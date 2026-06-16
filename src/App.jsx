@@ -241,6 +241,7 @@ function PlayerView({ poses, onClose }) {
         }
         const t = setTimeout(() => setTimeLeft(t => t - 1), 1000);
         return () => clearTimeout(t);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [timeLeft, paused, current]);
 
     const pose = poses[current];
