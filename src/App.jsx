@@ -1,4 +1,4 @@
-﻿import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const FONT = "SF Pro Rounded, -apple-system, sans-serif";
@@ -501,9 +501,10 @@ function ClassEditor({ cls, onBack, onUpdate }) {
 
     const dragData = useRef({});
     const color = CLASS_COLORS[cls.colorIdx ?? 0];
-
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     // Sync up to parent whenever poses change
-    useEffect(() => { onUpdate(cls.id, { poses }); }, [poses]);
+    useEffect(() => {
+        onUpdate(cls.id, { poses }); }, [poses]);
 
     const handleDragStart = useCallback((e, index) => {
         setDragIndex(index);
