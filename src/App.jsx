@@ -22,28 +22,89 @@ const CLASS_EMOJIS = ["🧘","🌿","🌸","✨","🌊","🍃","☀️","🌙","
 
 const DEFAULT_CLASSES = [
   { id: 1, name: "Morning Flow", emoji: "☀️", colorIdx: 0, poses: [
-    { name: "Mountain Pose", duration: 30, imageUrl: null },
-    { name: "Warrior I",     duration: 45, imageUrl: null },
-    { name: "Warrior II",    duration: 45, imageUrl: null },
-    { name: "Tree Pose",     duration: 30, imageUrl: null },
+    { name: "Mountain Pose", duration: 30, imageId: null },
+    { name: "Warrior I",     duration: 45, imageId: null },
+    { name: "Warrior II",    duration: 45, imageId: null },
+    { name: "Tree Pose",     duration: 30, imageId: null },
   ]},
   { id: 2, name: "Chair Yoga", emoji: "🪑", colorIdx: 2, poses: [
-    { name: "Seated Cat-Cow", duration: 30, imageUrl: null },
-    { name: "Seated Twist",   duration: 30, imageUrl: null },
+    { name: "Seated Cat-Cow", duration: 30, imageId: null },
+    { name: "Seated Twist",   duration: 30, imageId: null },
   ]},
   { id: 3, name: "Kids Yoga", emoji: "🌸", colorIdx: 3, poses: [
-    { name: "Happy Baby",     duration: 20, imageUrl: null },
-    { name: "Butterfly Pose", duration: 20, imageUrl: null },
-    { name: "Lion Pose",      duration: 15, imageUrl: null },
+    { name: "Happy Baby",     duration: 20, imageId: null },
+    { name: "Butterfly Pose", duration: 20, imageId: null },
+    { name: "Lion Pose",      duration: 15, imageId: null },
   ]},
 ];
 
-const STORAGE_KEY = "yogaClassBuilder_v1";
-const NEXT_ID_KEY = "yogaClassBuilder_nextId";
+// ─── IndexedDB image storage ──────────────────────────────────────────────────
+// Images are stored separately in IndexedDB (no size limit issues).
+// Each pose stores an imageId (a string key). The actual base64 data lives in IDB.
+
+var DB_NAME = "yogaImagesDB";
+var DB_VERSION = 1;
+var STORE_NAME = "images";
+var idbInstance = null;
+
+function openDB() {
+  return new Promise(function(resolve, reject) {
+    if (idbInstance) { resolve(idbInstance); return; }
+    var req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = function(e) {
+      e.target.result.createObjectStore(STORE_NAME);
+    };
+    req.onsuccess = function(e) {
+      idbInstance = e.target.result;
+      resolve(idbInstance);
+    };
+    req.onerror = function(e) { reject(e); };
+  });
+}
+
+function saveImageToDB(imageId, dataUrl) {
+  return openDB().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(STORE_NAME, "readwrite");
+      var store = tx.objectStore(STORE_NAME);
+      var req = store.put(dataUrl, imageId);
+      req.onsuccess = function() { resolve(); };
+      req.onerror = function(e) { reject(e); };
+    });
+  });
+}
+
+function loadImageFromDB(imageId) {
+  return openDB().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(STORE_NAME, "readonly");
+      var store = tx.objectStore(STORE_NAME);
+      var req = store.get(imageId);
+      req.onsuccess = function(e) { resolve(e.target.result || null); };
+      req.onerror = function(e) { reject(e); };
+    });
+  });
+}
+
+function deleteImageFromDB(imageId) {
+  return openDB().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(STORE_NAME, "readwrite");
+      var store = tx.objectStore(STORE_NAME);
+      var req = store.delete(imageId);
+      req.onsuccess = function() { resolve(); };
+      req.onerror = function(e) { reject(e); };
+    });
+  });
+}
+
+// ─── localStorage (classes metadata only, no images) ─────────────────────────
+var STORAGE_KEY = "yogaClassBuilder_v2";
+var NEXT_ID_KEY = "yogaClassBuilder_nextId";
 
 function loadClasses() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    var raw = localStorage.getItem(STORAGE_KEY);
     if (raw) return JSON.parse(raw);
   } catch (e) {}
   return DEFAULT_CLASSES;
@@ -53,13 +114,13 @@ function saveClasses(classes) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(classes));
   } catch (e) {
-    console.warn("Storage full:", e);
+    console.warn("Storage error:", e);
   }
 }
 
 function loadNextId() {
   try {
-    const raw = localStorage.getItem(NEXT_ID_KEY);
+    var raw = localStorage.getItem(NEXT_ID_KEY);
     if (raw) return parseInt(raw, 10);
   } catch (e) {}
   return 100;
@@ -69,13 +130,18 @@ function saveNextId(id) {
   try { localStorage.setItem(NEXT_ID_KEY, String(id)); } catch (e) {}
 }
 
+function generateImageId() {
+  return "img_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+}
+
 function formatTime(secs) {
-  const m = Math.floor(secs / 60), s = secs % 60;
+  var m = Math.floor(secs / 60), s = secs % 60;
   if (m > 0 && s > 0) return m + "m " + s + "s";
   if (m > 0) return m + "m";
   return s + "s";
 }
 
+// ─── Shared UI atoms ──────────────────────────────────────────────────────────
 function StatusBar() {
   return (
     <div style={{ height:"44px",background:CARD_BG,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 20px",fontSize:"12px",color:"#4A5568",fontWeight:"600",borderBottom:"1px solid rgba(0,0,0,0.06)",position:"sticky",top:0,zIndex:10,fontFamily:FONT }}>
@@ -89,7 +155,7 @@ function Sheet({ children, onClose }) {
   return (
     <div
       style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",display:"flex",alignItems:"flex-end",zIndex:100,backdropFilter:"blur(4px)" }}
-      onClick={function(e){ if(e.target===e.currentTarget) onClose(); }}
+      onClick={function(e){ if (e.target===e.currentTarget) onClose(); }}
     >
       <div style={{ background:CARD_BG,borderRadius:"24px 24px 0 0",padding:"28px 24px 40px",width:"100%",boxSizing:"border-box",maxWidth:"480px",margin:"0 auto" }}>
         <div style={{ width:"36px",height:"4px",background:"#D1D5DB",borderRadius:"2px",margin:"0 auto 24px" }} />
@@ -107,9 +173,9 @@ function PrimaryBtn({ children, onClick, disabled }) {
   return (
     <button onClick={onClick} disabled={disabled} style={{
       width:"100%",padding:"16px",borderRadius:"14px",border:"none",
-      background: disabled ? "#D1D5DB" : GREEN,
+      background:disabled?"#D1D5DB":GREEN,
       color:"#fff",fontSize:"17px",fontWeight:"700",
-      cursor: disabled ? "not-allowed" : "pointer",fontFamily:FONT,transition:"background 0.2s",
+      cursor:disabled?"not-allowed":"pointer",fontFamily:FONT,transition:"background 0.2s",
     }}>{children}</button>
   );
 }
@@ -125,9 +191,19 @@ function NavBtn({ children, onClick, disabled }) {
   );
 }
 
+// ─── PoseCard ─────────────────────────────────────────────────────────────────
+// Each pose stores imageId; this component loads the actual image data from IDB.
 function PoseCard({ pose, index, onDelete, onDragStart, boardMode }) {
   const [pressing, setPressing] = useState(false);
+  const [imgSrc, setImgSrc] = useState(null);
   const pressTimer = useRef(null);
+
+  useEffect(function() {
+    if (!pose.imageId) { setImgSrc(null); return; }
+    loadImageFromDB(pose.imageId).then(function(data) {
+      setImgSrc(data || null);
+    }).catch(function() { setImgSrc(null); });
+  }, [pose.imageId]);
 
   return (
     <div
@@ -149,11 +225,11 @@ function PoseCard({ pose, index, onDelete, onDragStart, boardMode }) {
       <div style={{
         width:"90px",height:"110px",borderRadius:"16px",overflow:"hidden",
         boxShadow:"0 2px 12px rgba(0,0,0,0.12)",
-        background:pose.imageUrl?"transparent":PLACEHOLDER_COLORS[index % PLACEHOLDER_COLORS.length],
+        background:imgSrc?"transparent":PLACEHOLDER_COLORS[index % PLACEHOLDER_COLORS.length],
         position:"relative",flexShrink:0,
       }}>
-        {pose.imageUrl
-          ? <img src={pose.imageUrl} alt={pose.name} style={{ width:"100%",height:"100%",objectFit:"cover" }} draggable={false} />
+        {imgSrc
+          ? <img src={imgSrc} alt={pose.name} style={{ width:"100%",height:"100%",objectFit:"cover" }} draggable={false} />
           : <div style={{ width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center" }}>
               <span style={{ fontSize:"32px" }}>🧘</span>
             </div>
@@ -182,32 +258,50 @@ function PoseCard({ pose, index, onDelete, onDragStart, boardMode }) {
   );
 }
 
+// ─── AddPoseModal ─────────────────────────────────────────────────────────────
 function AddPoseModal({ onClose, onAdd }) {
   const [name, setName] = useState("");
   const [duration, setDuration] = useState("30");
-  const [imageUrl, setImageUrl] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [imageData, setImageData] = useState(null);
   const fileRef = useRef();
 
-  const handleFile = function(e) {
+  var handleFile = function(e) {
     var file = e.target.files[0];
     if (!file) return;
     var r = new FileReader();
-    r.onload = function(ev){ setImageUrl(ev.target.result); };
+    r.onload = function(ev) {
+      setPreviewUrl(ev.target.result);
+      setImageData(ev.target.result);
+    };
     r.readAsDataURL(file);
+  };
+
+  var handleAdd = function() {
+    if (!name.trim()) return;
+    var imageId = imageData ? generateImageId() : null;
+    var savePromise = imageData && imageId ? saveImageToDB(imageId, imageData) : Promise.resolve();
+    savePromise.then(function() {
+      onAdd({ name: name.trim(), duration: parseInt(duration) || 30, imageId: imageId });
+      onClose();
+    }).catch(function() {
+      onAdd({ name: name.trim(), duration: parseInt(duration) || 30, imageId: null });
+      onClose();
+    });
   };
 
   return (
     <Sheet onClose={onClose}>
       <h3 style={{ margin:"0 0 20px",fontSize:"20px",fontWeight:"700",color:DARK,fontFamily:FONT }}>Add Pose</h3>
       <div onClick={function(){ fileRef.current.click(); }} style={{
-        height:"160px",background:imageUrl?"transparent":"#EFF3EE",
+        height:"160px",background:previewUrl?"transparent":"#EFF3EE",
         borderRadius:"16px",display:"flex",alignItems:"center",justifyContent:"center",
         cursor:"pointer",marginBottom:"16px",overflow:"hidden",
-        border:imageUrl?"none":"2px dashed #A8C4AE",position:"relative",
+        border:previewUrl?"none":"2px dashed #A8C4AE",position:"relative",
       }}>
-        {imageUrl ? (
+        {previewUrl ? (
           <>
-            <img src={imageUrl} alt="" style={{ width:"100%",height:"100%",objectFit:"cover" }} />
+            <img src={previewUrl} alt="" style={{ width:"100%",height:"100%",objectFit:"cover" }} />
             <div style={{ position:"absolute",inset:0,background:"rgba(0,0,0,0.25)",display:"flex",alignItems:"center",justifyContent:"center" }}>
               <span style={{ color:"#fff",fontSize:"13px",fontWeight:"600" }}>Tap to change</span>
             </div>
@@ -242,18 +336,12 @@ function AddPoseModal({ onClose, onAdd }) {
           );
         })}
       </div>
-      <PrimaryBtn
-        disabled={!name.trim()}
-        onClick={function(){
-          if (!name.trim()) return;
-          onAdd({ name: name.trim(), duration: parseInt(duration)||30, imageUrl: imageUrl });
-          onClose();
-        }}
-      >Add to Class</PrimaryBtn>
+      <PrimaryBtn disabled={!name.trim()} onClick={handleAdd}>Add to Class</PrimaryBtn>
     </Sheet>
   );
 }
 
+// ─── SwapModal ────────────────────────────────────────────────────────────────
 function SwapModal({ poses, targetIndex, onSwap, onClose }) {
   return (
     <Sheet onClose={onClose}>
@@ -276,6 +364,28 @@ function SwapModal({ poses, targetIndex, onSwap, onClose }) {
         background:"#EDF2F7",color:"#4A5568",fontSize:"16px",fontWeight:"600",cursor:"pointer",fontFamily:FONT,
       }}>Cancel</button>
     </Sheet>
+  );
+}
+
+// ─── PlayerView ───────────────────────────────────────────────────────────────
+function PlayerPoseImage({ pose, index }) {
+  const [imgSrc, setImgSrc] = useState(null);
+  useEffect(function() {
+    if (!pose.imageId) { setImgSrc(null); return; }
+    loadImageFromDB(pose.imageId).then(function(data){ setImgSrc(data||null); }).catch(function(){ setImgSrc(null); });
+  }, [pose.imageId]);
+  return (
+    <div style={{
+      width:"240px",height:"280px",borderRadius:"24px",overflow:"hidden",
+      background:imgSrc?"transparent":PLACEHOLDER_COLORS[index % PLACEHOLDER_COLORS.length],
+      marginBottom:"32px",boxShadow:"0 8px 40px rgba(0,0,0,0.5)",
+      display:"flex",alignItems:"center",justifyContent:"center",
+    }}>
+      {imgSrc
+        ? <img src={imgSrc} alt={pose.name} style={{ width:"100%",height:"100%",objectFit:"cover" }} />
+        : <span style={{ fontSize:"80px" }}>🧘</span>
+      }
+    </div>
   );
 }
 
@@ -315,17 +425,7 @@ function PlayerView({ poses, onClose }) {
       <div style={{ color:GREEN,fontSize:"13px",fontWeight:"600",marginBottom:"12px",letterSpacing:"0.1em" }}>
         POSE {current+1} OF {poses.length}
       </div>
-      <div style={{
-        width:"240px",height:"280px",borderRadius:"24px",overflow:"hidden",
-        background:pose && pose.imageUrl?"transparent":PLACEHOLDER_COLORS[current % PLACEHOLDER_COLORS.length],
-        marginBottom:"32px",boxShadow:"0 8px 40px rgba(0,0,0,0.5)",
-        display:"flex",alignItems:"center",justifyContent:"center",
-      }}>
-        {pose && pose.imageUrl
-          ? <img src={pose.imageUrl} alt={pose.name} style={{ width:"100%",height:"100%",objectFit:"cover" }} />
-          : <span style={{ fontSize:"80px" }}>🧘</span>
-        }
-      </div>
+      {pose && <PlayerPoseImage pose={pose} index={current} />}
       <h2 style={{ color:"#fff",fontSize:"28px",fontWeight:"700",margin:"0 0 8px" }}>{pose ? pose.name : ""}</h2>
       <div style={{ fontSize:"64px",fontWeight:"300",color:"#fff",margin:"8px 0",letterSpacing:"-2px" }}>
         {timeLeft}<span style={{ fontSize:"22px",color:GREEN,marginLeft:"4px" }}>s</span>
@@ -356,6 +456,7 @@ function PlayerView({ poses, onClose }) {
   );
 }
 
+// ─── NewClassModal ────────────────────────────────────────────────────────────
 function NewClassModal({ onClose, onSave, existing }) {
   var isEdit = !!existing;
   const [name, setName] = useState(existing ? existing.name : "");
@@ -412,6 +513,25 @@ function NewClassModal({ onClose, onSave, existing }) {
   );
 }
 
+// ─── MiniPoseThumb ────────────────────────────────────────────────────────────
+function MiniPoseThumb({ pose, index }) {
+  const [imgSrc, setImgSrc] = useState(null);
+  useEffect(function(){
+    if (!pose.imageId) { setImgSrc(null); return; }
+    loadImageFromDB(pose.imageId).then(function(d){ setImgSrc(d||null); }).catch(function(){ setImgSrc(null); });
+  }, [pose.imageId]);
+  return (
+    <div style={{
+      width:"28px",height:"28px",borderRadius:"8px",overflow:"hidden",
+      background:imgSrc?"transparent":PLACEHOLDER_COLORS[index%PLACEHOLDER_COLORS.length],
+      display:"flex",alignItems:"center",justifyContent:"center",fontSize:"13px",flexShrink:0,
+    }}>
+      {imgSrc ? <img src={imgSrc} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} /> : "🧘"}
+    </div>
+  );
+}
+
+// ─── ClassesHome ──────────────────────────────────────────────────────────────
 function ClassesHome({ classes, onOpen, onCreate, onDelete, onEdit }) {
   const [menuId, setMenuId] = useState(null);
 
@@ -459,16 +579,7 @@ function ClassesHome({ classes, onOpen, onCreate, onDelete, onEdit }) {
                   {cls.poses.length > 0 && (
                     <div style={{ display:"flex",gap:"4px",marginTop:"8px",flexWrap:"wrap" }}>
                       {cls.poses.slice(0,5).map(function(p,i){
-                        return (
-                          <div key={i} style={{
-                            width:"28px",height:"28px",borderRadius:"8px",overflow:"hidden",
-                            background:p.imageUrl?"transparent":PLACEHOLDER_COLORS[i%PLACEHOLDER_COLORS.length],
-                            display:"flex",alignItems:"center",justifyContent:"center",fontSize:"13px",
-                            flexShrink:0,
-                          }}>
-                            {p.imageUrl ? <img src={p.imageUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} /> : "🧘"}
-                          </div>
-                        );
+                        return <MiniPoseThumb key={i} pose={p} index={i} />;
                       })}
                       {cls.poses.length > 5 && (
                         <div style={{ width:"28px",height:"28px",borderRadius:"8px",background:"#E2E8F0",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"10px",fontWeight:"700",color:"#718096" }}>
@@ -496,8 +607,7 @@ function ClassesHome({ classes, onOpen, onCreate, onDelete, onEdit }) {
                   <button onClick={function(){ onEdit(cls.id); setMenuId(null); }} style={{
                     display:"block",width:"100%",padding:"14px 18px",border:"none",
                     background:"none",textAlign:"left",fontSize:"15px",fontWeight:"600",
-                    color:DARK,cursor:"pointer",fontFamily:FONT,
-                    borderBottom:"1px solid #F0F0EE",
+                    color:DARK,cursor:"pointer",fontFamily:FONT,borderBottom:"1px solid #F0F0EE",
                   }}>Rename</button>
                   <button onClick={function(){ onDelete(cls.id); setMenuId(null); }} style={{
                     display:"block",width:"100%",padding:"14px 18px",border:"none",
@@ -528,6 +638,21 @@ function ClassesHome({ classes, onOpen, onCreate, onDelete, onEdit }) {
   );
 }
 
+// ─── SequenceThumb ─────────────────────────────────────────────────────────────
+function SequenceThumb({ pose, index }) {
+  const [imgSrc, setImgSrc] = useState(null);
+  useEffect(function(){
+    if (!pose.imageId) { setImgSrc(null); return; }
+    loadImageFromDB(pose.imageId).then(function(d){ setImgSrc(d||null); }).catch(function(){ setImgSrc(null); });
+  }, [pose.imageId]);
+  return (
+    <div style={{ width:"36px",height:"36px",borderRadius:"8px",overflow:"hidden",background:imgSrc?"transparent":PLACEHOLDER_COLORS[index%PLACEHOLDER_COLORS.length],display:"flex",alignItems:"center",justifyContent:"center",fontSize:"18px",flexShrink:0 }}>
+      {imgSrc ? <img src={imgSrc} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} /> : "🧘"}
+    </div>
+  );
+}
+
+// ─── ClassEditor ──────────────────────────────────────────────────────────────
 function ClassEditor({ cls, onBack, onUpdate }) {
   const [poses, setPoses] = useState(cls.poses);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -570,6 +695,14 @@ function ClassEditor({ cls, onBack, onUpdate }) {
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
   }, []);
+
+  var handleDeletePose = function(idx) {
+    var pose = poses[idx];
+    if (pose && pose.imageId) {
+      deleteImageFromDB(pose.imageId).catch(function(){});
+    }
+    setPoses(function(prev){ return prev.filter(function(_,j){ return j!==idx; }); });
+  };
 
   var totalDuration = poses.reduce(function(s,p){ return s+p.duration; }, 0);
 
@@ -631,7 +764,7 @@ function ClassEditor({ cls, onBack, onUpdate }) {
                 <div key={i} data-pose-index={i}
                   style={{ opacity:dragIndex===i?0.4:1, transform:dragOverIndex===i&&dragIndex!==i?"scale(1.06)":"scale(1)", transition:"opacity 0.2s,transform 0.2s" }}>
                   <PoseCard pose={pose} index={i} boardMode
-                    onDelete={function(idx){ setPoses(function(prev){ return prev.filter(function(_,j){ return j!==idx; }); }); }}
+                    onDelete={handleDeletePose}
                     onDragStart={handleDragStart}
                   />
                   <button onClick={function(){ setSwapTarget(i); }} style={{
@@ -653,14 +786,12 @@ function ClassEditor({ cls, onBack, onUpdate }) {
                 return (
                   <div key={i} style={{ display:"flex",alignItems:"center",padding:"12px 16px",borderBottom:i<poses.length-1?"1px solid #F0F0EE":"none",gap:"12px" }}>
                     <div style={{ width:"28px",height:"28px",borderRadius:"50%",background:"#EFF3EE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"13px",fontWeight:"700",color:GREEN,flexShrink:0 }}>{i+1}</div>
-                    <div style={{ width:"36px",height:"36px",borderRadius:"8px",overflow:"hidden",background:pose.imageUrl?"transparent":PLACEHOLDER_COLORS[i%PLACEHOLDER_COLORS.length],display:"flex",alignItems:"center",justifyContent:"center",fontSize:"18px",flexShrink:0 }}>
-                      {pose.imageUrl ? <img src={pose.imageUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} /> : "🧘"}
-                    </div>
+                    <SequenceThumb pose={pose} index={i} />
                     <div style={{ flex:1,minWidth:0 }}>
                       <div style={{ fontSize:"15px",fontWeight:"600",color:DARK }}>{pose.name}</div>
                       <div style={{ fontSize:"12px",color:"#A0AEC0" }}>Hold for {pose.duration}s</div>
                     </div>
-                    <button onClick={function(){ setPoses(function(prev){ return prev.filter(function(_,j){ return j!==i; }); }); }} style={{ padding:"6px",border:"none",background:"none",color:"#CBD5E0",fontSize:"16px",cursor:"pointer" }}>x</button>
+                    <button onClick={function(){ handleDeletePose(i); }} style={{ padding:"6px",border:"none",background:"none",color:"#CBD5E0",fontSize:"16px",cursor:"pointer" }}>x</button>
                   </div>
                 );
               })}
@@ -688,6 +819,7 @@ function ClassEditor({ cls, onBack, onUpdate }) {
   );
 }
 
+// ─── Root App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [classes, setClasses] = useState(function(){ return loadClasses(); });
   const [activeId, setActiveId] = useState(null);
@@ -715,6 +847,12 @@ export default function App() {
   };
 
   var handleDelete = function(id) {
+    var cls = classes.find(function(c){ return c.id===id; });
+    if (cls) {
+      cls.poses.forEach(function(p){
+        if (p.imageId) deleteImageFromDB(p.imageId).catch(function(){});
+      });
+    }
     setClasses(function(prev){ return prev.filter(function(c){ return c.id!==id; }); });
     if (activeId===id) setActiveId(null);
   };
