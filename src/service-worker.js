@@ -1,17 +1,13 @@
 /* eslint-disable no-restricted-globals */
+
+self.__WB_MANIFEST;
+
 var CACHE_NAME = "yoga-builder-v1";
-var urlsToCache = [
-  "/",
-  "/index.html",
-  "/static/js/main.chunk.js",
-  "/static/js/bundle.js",
-  "/manifest.json"
-];
 
 self.addEventListener("install", function(event) {
   event.waitUntil(
     caches.open(CACHE_NAME).then(function(cache) {
-      return cache.addAll(urlsToCache);
+      return cache.addAll(["/", "/index.html"]);
     })
   );
   self.skipWaiting();
