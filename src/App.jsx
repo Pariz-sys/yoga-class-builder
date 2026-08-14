@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useState, useRef, useCallback, useEffect } from "react";
 
-const FONT   = "'Cormorant Garamond', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif";
+const FONT = "SF Pro Rounded, -apple-system, BlinkMacSystemFont, sans-serif";
 const PURPLE = "#9B7FC2";
 const DARK   = "#2D2040";
 const BG     = "#F7F4FB";
